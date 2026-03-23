@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas" width="1280" height="720"></canvas>
+    <div id="ui-layer">
+      <div id="hud">
+        <div id="money">💰 $0</div>
+        <div id="rod-info">🎣 Basic Rod</div>
+      </div>
+      <div id="shop-panel" class="panel hidden">
+        <div class="panel-header"><h2>🏪 Tackle Shop</h2><button id="close-shop-top" class="btn btn-close" onclick="game.closeShop()">✕</button></div>
+        <div id="shop-items"></div>
+        <button id="close-shop" class="btn btn-full">Close</button>
+      </div>
+      <div id="market-panel" class="panel hidden">
+        <div class="panel-header"><h2>🐟 Fish Market</h2><button id="close-market-top" class="btn btn-close" onclick="game.closeMarket()">✕</button></div>
+        <div id="inventory-items"></div>
+        <button id="sell-all" class="btn btn-full">💰 Sell All Fish</button>
+        <button id="close-market" class="btn btn-full">Close</button>
+      </div>
+    </div>
+  </div>
+  <script src="GameObject.js"></script>
+  <script src="Particle.js"></script>
+  <script src="Fish.js"></script>
+  <script src="FishingLine.js"></script>
+  <script src="Player.js"></script>
+  <script src="CatchMinigame.js"></script>
+  <script src="Game.js"></script>
+  <script>
+    const game = new Game(document.getElementById('gameCanvas'));
+    window.game = game;
+    game.start();
+  </script>
+</body>
+</html>
