@@ -1,3 +1,6 @@
+// ==============================
+// LOCAL BROWSER SAVE WRAPPER
+// ==============================
 const SaveData = {
   prefix: 'pixelFishing_',
 
@@ -8,7 +11,7 @@ const SaveData = {
       localStorage.removeItem(testKey);
       return true;
     } catch (err) {
-      console.error('localStorage unavailable:', err);
+      console.error('localStorage is not available:', err);
       return false;
     }
   },
@@ -18,7 +21,7 @@ const SaveData = {
       const raw = localStorage.getItem(this.prefix + key);
       return raw ? JSON.parse(raw) : null;
     } catch (err) {
-      console.error('Load failed for key:', key, err);
+      console.error('Failed to load save key:', key, err);
       return null;
     }
   },
@@ -28,7 +31,7 @@ const SaveData = {
       localStorage.setItem(this.prefix + key, JSON.stringify(value));
       return true;
     } catch (err) {
-      console.error('Save failed for key:', key, err);
+      console.error('Failed to save key:', key, err);
       return false;
     }
   },
@@ -38,11 +41,67 @@ const SaveData = {
       localStorage.removeItem(this.prefix + key);
       return true;
     } catch (err) {
-      console.error('Remove failed for key:', key, err);
+      console.error('Failed to remove save key:', key, err);
       return false;
     }
   }
 };
+
+function buildSavePayload(game) {
+  return {
+    money: game.money,
+    inventory: game.inventory.map(f => ({
+      fishName: f.fishName,
+      rarity: f.rarity,
+      value: f.value,
+      weight: f.weight,
+      color1: f.color1,
+      color2: f.color2,
+      size: f.size,
+      difficulty: f.difficulty,
+      name: f.fishName
+    })),
+    currentLocation: game.currentLocation,
+    unlockedLocations: game.locations.map(l => !!l.unlocked),
+    rodLevel: game.rodLevel,
+    selectedBait: game.selectedBait,
+    luckLevel: game.luckLevel,
+    baitStock: game.baitStock.map(b => b === Infinity ? -1 : b),
+    timestamp: Date.now()
+  };
+}
+
+window.addEventListener('beforeunload', () => {
+  const activeGame = window.game || globalThis.game;
+  if (!activeGame || activeGame.currentSlot === null || !SaveData.isAvailable()) return;
+
+  try {
+    localStorage.setItem(
+      SaveData.prefix + 'fishSlot' + activeGame.currentSlot,
+      JSON.stringify(buildSavePayload(activeGame))
+    );
+  } catch (err) {
+    console.error('beforeunload save failed:', err);
+  }
+});
+
+(function () {
+  const _setInterval = window.setInterval;
+  window.setInterval = function (fn, delay, ...args) {
+    const wrapped = typeof fn === 'function'
+      ? function (...cbArgs) {
+          const result = fn.apply(this, cbArgs);
+          const activeGame = window.game || globalThis.game;
+          if (activeGame && activeGame.currentSlot !== null && SaveData.isAvailable()) {
+            SaveData.set('fishSlot' + activeGame.currentSlot, buildSavePayload(activeGame));
+          }
+          return result;
+        }
+      : fn;
+    return _setInterval(wrapped, delay, ...args);
+  };
+})();
+
 // ===== USER GAME CODE BELOW =====
 // Pasted from uploaded file and updated to use built-in local browser saving.
 
@@ -138,18 +197,25 @@ class Game {
   }
 
   async loadSavePreviews() {
-  this.saveSlotPreviews = [null, null, null];
+    this.saveSlotPreviews = [null, null, null];
 
-  if (!SaveData.isAvailable()) {
-    console.warn('Save system unavailable.');
-    return;
-  }
+    if (!SaveData.isAvailable()) {
+      console.warn('Save system unavailable.');
+      return;
+    }
 
-  for (let i = 0; i < 3; i++) {
-    const data = await SaveData.get('fishSlot' + i);
-    this.saveSlotPreviews[i] = data || null;
+    for (let i = 0; i < 3; i++) {
+      try {
+        const data = await SaveData.get('fishSlot' + i);
+        this.saveSlotPreviews[i] = data || null;
+      } catch (e) {
+        console.error('Preview load failed for slot', i, e);
+        this.saveSlotPreviews[i] = null;
+      }
+    }
+
+    this.renderSavePreviews();
   }
-}
 
   renderSavePreviews() {
     for (let i = 0; i < 3; i++) {
@@ -214,69 +280,75 @@ class Game {
     }, 15000);
   }
 
- async saveGame() {
-  if (this.currentSlot === null) return;
+  async saveGame() {
+    if (this.currentSlot === null) {
+      console.warn('No save slot selected.');
+      return false;
+    }
 
-  const data = {
-    money: this.money,
-    inventory: this.inventory.map(f => ({
-      fishName: f.fishName,
-      rarity: f.rarity,
-      value: f.value,
-      weight: f.weight,
-      color1: f.color1,
-      color2: f.color2,
-      size: f.size,
-      difficulty: f.difficulty,
-      name: f.fishName
-    })),
-    currentLocation: this.currentLocation,
-    unlockedLocations: this.locations.map(l => l.unlocked),
-    rodLevel: this.rodLevel,
-    selectedBait: this.selectedBait,
-    luckLevel: this.luckLevel,
-    baitStock: this.baitStock.map(b => b === Infinity ? -1 : b),
-    timestamp: Date.now()
-  };
+    if (!SaveData.isAvailable()) {
+      console.warn('Cannot save: localStorage unavailable.');
+      return false;
+    }
 
-  if (SaveData.isAvailable()) {
-    await SaveData.set('fishSlot' + this.currentSlot, data);
-    this.saveSlotPreviews[this.currentSlot] = data;
-    console.log('Saved slot', this.currentSlot, data);
+    const data = buildSavePayload(this);
+    const ok = await SaveData.set('fishSlot' + this.currentSlot, data);
+
+    if (ok) {
+      this.saveSlotPreviews[this.currentSlot] = data;
+      this.renderSavePreviews();
+      console.log('Game saved to slot', this.currentSlot, data);
+      return true;
+    }
+
+    return false;
   }
-}
 
   async loadGame(slot) {
-  if (!SaveData.isAvailable()) return;
+    if (!SaveData.isAvailable()) {
+      console.warn('Cannot load: localStorage unavailable.');
+      return;
+    }
 
-  const data = await SaveData.get('fishSlot' + slot);
-  if (!data) {
-    console.warn('No save found for slot', slot);
-    return;
-  }
+    const data = await SaveData.get('fishSlot' + slot);
 
-  this.money = data.money ?? 0;
-  this.inventory = (data.inventory || []).map(f => new Fish(f));
-  this.currentLocation = data.currentLocation ?? 0;
-  this.rodLevel = data.rodLevel ?? 0;
-  this.selectedBait = data.selectedBait ?? 0;
-  this.luckLevel = data.luckLevel ?? 0;
-  this.baitStock = Array.isArray(data.baitStock)
-    ? data.baitStock.map(b => b === -1 ? Infinity : b)
-    : [Infinity, 0, 0, 0, 0, 0, 0, 0];
+    if (!data) {
+      console.warn('No save data found for slot', slot);
+      return;
+    }
 
-  if (Array.isArray(data.unlockedLocations)) {
-    this.locations.forEach((loc, i) => {
-      loc.unlocked = !!data.unlockedLocations[i];
+    this.money = data.money ?? 0;
+    this.inventory = (data.inventory || []).map(f => new Fish(f));
+    this.currentLocation = data.currentLocation ?? 0;
+
+    this.locations.forEach((l, i) => {
+      l.unlocked = i === 0;
     });
+
+    if (Array.isArray(data.unlockedLocations)) {
+      data.unlockedLocations.forEach((u, i) => {
+        if (this.locations[i]) this.locations[i].unlocked = !!u;
+      });
+    }
+
+    this.rodLevel = data.rodLevel ?? 0;
+    this.selectedBait = data.selectedBait ?? 0;
+    this.luckLevel = data.luckLevel ?? 0;
+
+    if (Array.isArray(data.baitStock)) {
+      this.baitStock = data.baitStock.map(b => b === -1 ? Infinity : b);
+    } else {
+      this.baitStock = [Infinity, 0, 0, 0, 0, 0, 0, 0];
+    }
+
+    this.currentSlot = slot;
+    this.menuOpen = false;
+    this.state = 'idle';
+
+    this.render();
+    this.renderSavePreviews();
+    console.log('Game loaded from slot', slot, data);
   }
-
-  this.currentSlot = slot;
-  this.menuOpen = false;
-  this.state = 'idle';
-
-  console.log('Loaded slot', slot, data);
-}
 
   render() {
     const moneyEl = document.getElementById('moneyDisplay');
